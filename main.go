@@ -13,23 +13,37 @@ func main() {
     if err != nil {
 	log.Fatal(err)
     }
+    defer file.Close()
 
-    var line string
-    bytes := make([]byte, 8)
-    for {
-        _, err := file.Read(bytes)
+    ch := getLinesChannel(file)
 
-	if err == io.EOF {
-	    break
-        } else if err != nil {
-            log.Fatal(err)
-        }
-
-	parts := strings.Split(string(bytes), "\n")
-	line += parts[0]
-	if len(parts) > 1 {
-            fmt.Println("read:", line)
-	    line = parts[1]
-        }
+    for line := range(ch) {
+        fmt.Println("read:", line)
     }
+}
+
+func getLinesChannel(f io.ReadCloser) <-chan string {
+    ch := make(chan string)
+
+    go func(){
+        var line string
+        bytes := make([]byte, 8, 8)
+        for {
+  	    _, err := f.Read(bytes)
+ 
+ 	    if err == io.EOF {
+	        close(ch)
+ 	        break
+ 	    } else if err != nil {
+	        log.Fatal(err)
+	    }
+            parts := strings.Split(string(bytes), "\n")
+   	    line += parts[0]
+	    if len(parts) > 1 {
+	        ch <- line
+	        line = parts[1]
+  	    } 
+        }
+    }()
+    return ch
 }
