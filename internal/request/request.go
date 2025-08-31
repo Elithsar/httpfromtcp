@@ -2,20 +2,24 @@ package request
 
 import (
 	"errors"
+	"fmt"
 	"httpfromtcp/internal/headers"
 	"io"
+	"strconv"
 	"strings"
 )
 
 const (
 	StateInitialized = iota
 	StateRequestStateParsingHeaders
+	StateParsingBody
 	StateDone
 )
 
 type Request struct {
 	RequestLine RequestLine
 	Headers     headers.Headers
+	Body        []byte
 	state       int // 0 = initialized, 1 = done
 }
 
@@ -50,7 +54,7 @@ func RequestFromReader(reader io.Reader) (*Request, error) {
 		if err == io.EOF {
 			// Si on atteint EOF mais que l'état n'est pas StateDone, c'est une erreur
 			if r.state != StateDone {
-				return nil, errors.New("unexpected EOF: headers not terminated")
+				return nil, errors.New("unexpected EOF: headers not terminated: State " + strconv.Itoa(r.state))
 			}
 			break
 		}
@@ -136,10 +140,34 @@ func (r *Request) parse(data []byte) (int, error) {
 			}
 			totalParsed += n
 			if done {
+				if contentLengthStr, exists := r.Headers.Get("content-length"); exists {
+					// Parse content length
+					contentLength, err := strconv.Atoi(contentLengthStr)
+					if err != nil || contentLength < 0 {
+						return totalParsed, errors.New("invalid Content-Length header")
+					}
+					if contentLength > 0 {
+						r.Body = make([]byte, contentLength)
+						r.state = StateParsingBody
+						continue
+					}
+				}
 				r.state = StateDone
 				return totalParsed, nil
 			}
 			// Continue parsing headers if not done
+		case StateParsingBody:
+			contentLengthStr, _ := r.Headers.Get("content-length")
+			fmt.Println("Parsing body, Content-Length:", contentLengthStr)
+			contentLength, _ := strconv.Atoi(contentLengthStr)
+			if len(data[totalParsed:]) < contentLength {
+				// Not enough data for body
+				return totalParsed, nil
+			}
+			r.Body = data[totalParsed : totalParsed+contentLength]
+			r.state = StateDone
+
+			return totalParsed, nil
 		case StateDone:
 			return totalParsed, nil
 		}
